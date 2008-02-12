@@ -22,6 +22,9 @@ libc.fscanf:types("int", "pointer", "string", "ref double")
 libc.fcntl:types("int", "int", "int", "int")
 libc.popen:types("pointer", "string", "string")
 libc.fileno:types("int", "pointer")
+libc.fflush:types("int", "pointer")
+libc.fseek:types("int", "pointer", "int", "int")
+libc.setvbuf:types("int", "pointer", "string", "int", "int")
 
 require("aio_constants")
 
@@ -44,6 +47,17 @@ local mode2flags = {
   ["ab+"] = bit.bor(O_RDWR, O_CREAT, O_APPEND),
   ["a+b"] = bit.bor(O_RDWR, O_CREAT, O_APPEND)
 }
+
+local function tofile(file)
+  local ok, fd, stream = pcall(alien.unwrap, "aio_file", file)
+  if not ok then
+    error("not an async IO stream!")
+  elseif not stream then
+    error("attempt to use a closed file")
+  else
+    return fd, stream
+  end
+end
 
 local function aio_error(path)
   local en = alien.errno()
@@ -70,12 +84,27 @@ function open(path, mode)
 end
 
 function close(file)
-  local fd = alien.unwrap("aio_file", file)
-  local status = libc.close(fd)
-  if status ~= -1 then
-    return true
+  local fd, stream = tofile(file)
+  if stream then
+    local status = libc.close(fd)
+    if status ~= -1 then
+      alien.rewrap("aio_file", file, fd, nil)
+      return true
+    else
+      return aio_error()
+    end
+  end
+  return true
+end
+
+function _M.type(file)
+  local ok, fd, stream = pcall(alien.unwrap, file)
+  if not ok then
+    return nil
+  elseif stream then
+    return "file"
   else
-    return aio_error()
+    return "closed file"
   end
 end
 
@@ -172,7 +201,7 @@ local function aio_read_item(fd, stream, what)
 end
 
 local function aio_read(file, ...)
-  local fd, stream = alien.unwrap("aio_file", file)
+  local fd, stream = tofile(file)
   local nargs = select("#", ...)
   if nargs == 0 then
     return aio_read_line(fd, stream)
@@ -210,7 +239,7 @@ local function aio_write_item(fd, item)
 end
 
 local function aio_write(file, ...)
-  local fd = alien.unwrap("aio_file", file)
+  local fd = tofile(file)
   local nargs = select("#", ...)
   local status = true
   for i = 1, nargs do
@@ -251,13 +280,104 @@ function popen(cmd, mode)
   return aio_error(cmd)
 end
 
+local function aio_flush(file)
+  local fd, stream = tofile(file)
+  if libc.fflush(stream) ~= 0 then
+    local en = alien.errno()
+    if en == EAGAIN then
+      thread.yield("io", "write", fd)
+      return aio_flush(file)
+    else
+      return nil, lib.strerror(en)
+    end
+  else
+    return true
+  end
+end
+
+function flush()
+  return aio_flush(stdout)
+end
+
+local seek_whence = {
+  cur = SEEK_CUR,
+  set = SEEK_SET,
+  ["end"] = SEEK_END
+}
+
+local function aio_seek(file, whence, offset)
+  if type(whence) == "number" then
+    whence, offset = nil, whence
+  end
+  local n_whence, offset = seek_whence[whence or "cur"], offset or 0
+  if not n_whence then error("invalid option for file:seek") end
+  local fd, stream = tofile(file)
+  if libc.fseek(stream, offset, n_whence) ~= 0 then
+    local en = alien.errno()
+    if en == EAGAIN then
+      thread.yield("io", "write", fd)
+      return aio_seek(file, whence, offset)
+    else
+      return nil, lib.strerror(en)
+    end
+  else
+    return true
+  end
+end
+
+local setvbuf_mode = {
+  no = _IONBF,
+  full = _IOFBF,
+  line = _IOLBF
+}
+
+local function aio_setvbuf(file, mode, size)
+  local n_mode, size = setvbuf_mode[mode], size or 0
+  if not n_mode then error("invalid option for file:setvbuf") end
+  local fd, stream = tofile(file)
+  if libc.setvbuf(stream, nil, n_mode, size) ~= 0 then
+    return aio_error()
+  else
+    return true
+  end
+end
+
+function input(file)
+  local f
+  if type(file) == "string" then
+    f = aio.open(file, "r")
+  elseif f then
+    tofile(file)
+    f = file
+  else
+    f = stdin
+  end
+  stdin = f
+end
+
+function output(file)
+  local f
+  if type(file) == "string" then
+    f = aio.open(file, "w")
+  elseif f then
+    tofile(file)
+    f = file
+  else
+    f = stdout
+  end
+  stdout = f
+end
+
 file_meta.__gc = close
 
 file_meta.__index = {
   read = aio_read,
   write = aio_write,
   close = close,
-  lines = lines
+  lines = lines,
+  flush = aio_flush,
+  seek = aio_seek,
+  setvbuf = aio_setvbuf
 }
 
 do
