@@ -27,6 +27,7 @@ build = {
    type = "make",
    install_variables = {
       LUA_DIR = "$(LUADIR)",
+      PREFIX = "$(PREFIX)"
    },
    build_variables = {
       CFLAGS = "$(CFLAGS)",

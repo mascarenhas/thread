@@ -21,6 +21,8 @@ src/event_constants.c: src/event_constants.def
 
 install:
 	cp src/*.lua $(LUA_DIR)
+	cp -r tests $(PREFIX)/
+	cp -r doc $(PREFIX)/
 
 clean:
 	rm -f src/event_constants src/event_constants.lua src/aio_constants src/aio_constants.lua src/event_constants.c src/aio_constants.c
