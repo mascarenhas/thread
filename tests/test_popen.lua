@@ -15,15 +15,7 @@ end
 thread.new(function () return tail("foo.txt") end)
 thread.new(function () return tail("bar.txt") end)
 
-local i = 0
-
 while true do
   thread.yield("timer", 2000)
---  thread.yield()
---  if i == 100000 then
   print("yeah!")
---  i = 0
---  else
---  i = i + 1
---  end
 end
