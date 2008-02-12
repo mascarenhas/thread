@@ -24,3 +24,7 @@ install:
 
 clean:
 	rm event_constants event_constants.lua aio_constants aio_constants.lua *.c
+
+upload:
+	darcs dist -d aio-current
+	ncftpput -u mascarenhas ftp.luaforge.net alien/htdocs aio-current.tar.gz
