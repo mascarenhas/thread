@@ -45,7 +45,7 @@ local function handle_io(fd, ev_code, arg)
   return 0
 end
 
-local handle_io_cb = alien.new_callback(handle_io, "void", "int", "int",
+local handle_io_cb = alien.callback(handle_io, "void", "int", "int",
 					  "pointer")
 
 local function queue_event(thr, ev_code, fd)

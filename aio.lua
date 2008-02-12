@@ -5,7 +5,7 @@ require "thread"
 
 module(..., package.seeall)
 
-local file_meta = alien.new_tag("aio_file")
+local file_meta = alien.tag("aio_file")
 
 local libc = alien.default
 
@@ -80,7 +80,7 @@ function close(file)
 end
 
 local function aio_read_bytes(fd, n)
-  local buf = alien.new_buffer(math.min(n, BUFSIZ))
+  local buf = alien.buffer(math.min(n, BUFSIZ))
   local out = {}
   local r = n
   while n > 0 and r > 0 do
@@ -128,7 +128,7 @@ local function aio_read_number(fd, stream)
 end
 
 local function aio_read_line(fd, stream)
-  local buf = alien.new_buffer(BUFSIZ)
+  local buf = alien.buffer(BUFSIZ)
   local again = false
   repeat
     local n = libc.fgets(buf, BUFSIZ, stream)
@@ -145,8 +145,7 @@ local function aio_read_line(fd, stream)
 	return nil
       end
     else
-      local len = libc.strlen(buf)
-      local res = buf:tostring(len)
+      local res = buf:tostring()
       if not res:sub(#res) == "\n" then
 	local next, err = aio_read_line(stream)
 	if err then return nil, err end
@@ -260,6 +259,21 @@ file_meta.__index = {
   close = close,
   lines = lines
 }
+
+do
+  local status = libc.fcntl(STDIN, F_GETFL, 0)
+  if libc.fcntl(STDIN, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
+    error("could not set stdin to not block")
+  end
+  local status = libc.fcntl(STDOUT, F_GETFL, 0)
+  if libc.fcntl(STDOUT, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
+    error("could not set stdout to not block")
+  end
+  local status = libc.fcntl(STDERR, F_GETFL, 0)
+  if libc.fcntl(STDERR, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
+    error("could not set stderr to not block")
+  end
+end
 
 stdin = alien.wrap("aio_file", STDIN, libc.fdopen(STDIN, "r"))
 stdout = alien.wrap("aio_file", STDOUT, libc.fdopen(STDOUT, "w"))
