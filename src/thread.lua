@@ -23,7 +23,7 @@ local events = {
   timer = EV_TIMEOUT
 }
 
-local current_thread = nil -- nil is the main thread
+local current_thread = "main"
 
 local waiting_threads = {
   [EV_READ] = {},
@@ -78,53 +78,48 @@ function yield(tag, ev, fd, timeout)
 				   (ev % 1000) * 1000)
     event.event_once(fd, ev_code, handle_io_cb, nil, time)
   end
-  queue_event(current_thread or "main", ev_code or "idle", fd)
-  if current_thread then 
-    current_thread = nil
-    return coroutine.yield(tag)
+  queue_event(current_thread, ev_code or "idle", fd)
+  if current_thread == "main" then
+    event_loop()
   else
-    return event_loop()
+    coroutine.yield(tag)
   end
 end
 
-function new(func)
-  if current_thread then
-    local child = current_thread
-    current_thread = nil
-    return coroutine.yield("new", child, func)
+function new(func, ...)
+  local args = { ... }
+  local t = coroutine.wrap(function () return func(unpack(args)) end)
+  queue_event(t, "idle")
+  queue_event(current_thread, "idle")
+  if current_thread == "main" then
+    event_loop()
   else
-    local t = coroutine.wrap(func)
-    table.insert(waiting_threads.idle, 1, t)
+    coroutine.yield()
   end
 end
 
-function handle(child)
-  if child == "main" then return end
-  local op, child, arg = child()
-  if op == "new" then
-    table.insert(waiting_threads.idle, 1, child)
-    return new(arg)
-  else
-    return event_loop()
-  end
-end
-
-function event_loop(block)
-  if block then
-    event.event_loop(EVLOOP_ONCE)
-  else
-    event.event_loop(EVLOOP_NONBLOCK)
-  end
+local function get_next()
   local next = next_thread
   next_thread = nil
   if not next then
-    next = waiting_threads.idle[#waiting_threads.idle]
-    waiting_threads.idle[#waiting_threads.idle] = nil
+    next = table.remove(waiting_threads.idle)
   end
-  if next == "main" then current_thread = nil else current_thread = next end
-  if next then
-    return handle(next)
-  else
-    return event_loop(true)
+  return next
+end
+
+function event_loop()
+  local block = EVLOOP_NONBLOCK
+  while true do
+    event.event_loop(block)
+    block = EVLOOP_NONBLOCK
+    local next = get_next()
+    current_thread = next
+    if not next then
+      block = EVLOOP_ONCE
+    elseif next == "main" then
+      return 
+    else 
+      next()
+    end
   end
 end

@@ -109,17 +109,18 @@ function _M.type(file)
 end
 
 local buffer_queue = {}
+setmetatable(buffer_queue, { __mode = "v" })
 
 local function get_buffer()
   if #buffer_queue == 0 then
     return alien.buffer(BUFSIZ)
   else
-    local buf = buffer_queue:remove()
+    return table.remove(buffer_queue)
   end
 end
 
 local function dispose_buffer(buf)
-  buffer_queue:add(buf)
+  table.insert(buffer_queue, buf)
 end
 
 local function aio_read_bytes(fd, n)

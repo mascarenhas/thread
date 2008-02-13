@@ -1,4 +1,4 @@
-
+require "luarocks.require"
 require "aio"
 require "thread"
 
@@ -9,11 +9,12 @@ local function tail(file)
   while line do
     aio.write(line)
     line = lines()
+    thread.yield()
   end
 end
 
-thread.new(function () return tail("foo.txt") end)
-thread.new(function () return tail("bar.txt") end)
+thread.new(tail, "foo.txt")
+thread.new(tail, "bar.txt")
 
 while true do
   thread.yield("timer", 2000)
