@@ -49,6 +49,7 @@ local handle_io_cb = alien.callback(handle_io, "void", "int", "int",
 					  "pointer")
 
 local function queue_event(thr, ev_code, fd)
+  print(thr, ev_code, fd)
   local queue
   if fd then
     queue = waiting_threads[ev_code][fd]
@@ -62,27 +63,29 @@ local function queue_event(thr, ev_code, fd)
   table.insert(queue, 1, thr)
 end
 
-function yield(tag, ev, fd, timeout)
+function yield(ev, fd, timeout)
+  if type(ev) == "number" then
+    ev, fd = "timer", ev
+  end
   local ev_code = events[ev]
-  if tag == "io" then
+  if ev == "read" or ev == "write" then
     local time
     if timeout then
       time = alien.struct.pack("ll", math.floor(timeout / 1000),
 			       (timeout % 1000) * 1000)
     end
     event.event_once(fd, ev_code, handle_io_cb, nil, time)
-  elseif tag == "timer" then
-    fd = -1
-    ev_code = events["timer"]
-    local time = alien.struct.pack("ll", math.floor(ev / 1000),
-				   (ev % 1000) * 1000)
+  elseif ev == "timer" then
+    fd, timeout = -1, fd
+    local time = alien.struct.pack("ll", math.floor(timeout / 1000),
+				   (timeout % 1000) * 1000)
     event.event_once(fd, ev_code, handle_io_cb, nil, time)
   end
   queue_event(current_thread, ev_code or "idle", fd)
   if current_thread == "main" then
     event_loop()
   else
-    coroutine.yield(tag)
+    coroutine.yield()
   end
 end
 

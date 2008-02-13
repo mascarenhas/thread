@@ -17,6 +17,6 @@ thread.new(tail, "foo.txt")
 thread.new(tail, "bar.txt")
 
 while true do
-  thread.yield("timer", 2000)
+  thread.yield(2000)
   print("yeah!")
 end
