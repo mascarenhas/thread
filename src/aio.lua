@@ -108,8 +108,22 @@ function _M.type(file)
   end
 end
 
+local buffer_queue = {}
+
+local function get_buffer()
+  if #buffer_queue == 0 then
+    return alien.buffer(BUFSIZ)
+  else
+    local buf = buffer_queue:remove()
+  end
+end
+
+local function dispose_buffer(buf)
+  buffer_queue:add(buf)
+end
+
 local function aio_read_bytes(fd, n)
-  local buf = alien.buffer(math.min(n, BUFSIZ))
+  local buf = get_buffer()
   local out = {}
   local r = n
   while n > 0 and r > 0 do
@@ -121,6 +135,7 @@ local function aio_read_bytes(fd, n)
 	r = 1
 	thread.yield("io", "read", fd)
       else
+	dispose_buffer(buf)
 	return nil, libc.strerror(en)
       end
     else
@@ -128,6 +143,7 @@ local function aio_read_bytes(fd, n)
       n = n - r
     end
   end
+  dispose_buffer(buf)
   return table.concat(out)
 end
 
@@ -156,34 +172,36 @@ local function aio_read_number(fd, stream)
   end
 end
 
-local function aio_read_line(fd, stream)
-  local buf = alien.buffer(BUFSIZ)
-  local again = false
-  repeat
+local function aio_read_line(fd, stream, buf)
+  buf = buf or get_buffer()
+  while true do
     local n = libc.fgets(buf, BUFSIZ, stream)
     if n == 0 then
       if libc.ferror(stream) ~= 0 then
 	local en = alien.errno()
 	if en == EAGAIN then
 	  thread.yield("io", "read", fd)
-	  again = true
 	else
+	  dispose_buffer(buf)
 	  return nil, libc.strerror(en)
 	end
       else
+	dispose_buffer(buf)
 	return nil
       end
     else
       local res = buf:tostring()
       if not res:sub(#res) == "\n" then
-	local next, err = aio_read_line(stream)
+	local next, err = aio_read_line(stream, buf)
 	if err then return nil, err end
+	dispose_buffer(buf)
 	return res .. (next or "")
       else
+	dispose_buffer(buf)
 	return res
       end
     end
-  until not again
+  end
 end
 
 local function aio_read_item(fd, stream, what)
