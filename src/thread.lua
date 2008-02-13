@@ -49,7 +49,6 @@ local handle_io_cb = alien.callback(handle_io, "void", "int", "int",
 					  "pointer")
 
 local function queue_event(thr, ev_code, fd)
-  print(thr, ev_code, fd)
   local queue
   if fd then
     queue = waiting_threads[ev_code][fd]
