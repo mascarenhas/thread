@@ -9,7 +9,7 @@ local function tail(file)
   while line do
     aio.write(line)
     line = lines()
-    thread.yield()
+    thread.yield(10)
   end
 end
 

@@ -20,7 +20,6 @@ require("event_constants")
 local events = {
   read = EV_READ,
   write = EV_WRITE,
-  timer = EV_TIMEOUT
 }
 
 local current_thread = "main"
@@ -28,9 +27,10 @@ local current_thread = "main"
 local waiting_threads = {
   [EV_READ] = {},
   [EV_WRITE] = {},
-  [EV_TIMEOUT] = {},
   idle = {}
 }
+
+local timer_threads = {}
 
 local next_thread
 
@@ -45,8 +45,15 @@ local function handle_io(fd, ev_code, arg)
   return 0
 end
 
+local function handle_timer(fd, ev_code, thread_id)
+  next_thread = timer_threads[thread_id]
+  timer_threads[thread_id] = nil
+end
+
 local handle_io_cb = alien.callback(handle_io, "void", "int", "int",
 					  "pointer")
+local handle_timer_cb = alien.callback(handle_timer, "void", "int", "int",
+				          "string")
 
 local function queue_event(thr, ev_code, fd)
   local queue
@@ -62,25 +69,29 @@ local function queue_event(thr, ev_code, fd)
   table.insert(queue, 1, thr)
 end
 
+local function queue_timer(thr)
+  local thread_id = tostring(thr)
+  timer_threads[thread_id] = thr
+  return thread_id
+end
+
 function yield(ev, fd, timeout)
   if type(ev) == "number" then
     ev, fd = "timer", ev
   end
-  local ev_code = events[ev]
   if ev == "read" or ev == "write" then
-    local time
-    if timeout then
-      time = alien.struct.pack("ll", math.floor(timeout / 1000),
-			       (timeout % 1000) * 1000)
-    end
-    event.event_once(fd, ev_code, handle_io_cb, nil, time)
+    local ev_code = events[ev]
+    event.event_once(fd, ev_code, handle_io_cb, nil, nil)
+    queue_event(current_thread, ev_code, fd)
   elseif ev == "timer" then
     fd, timeout = -1, fd
     local time = alien.struct.pack("ll", math.floor(timeout / 1000),
 				   (timeout % 1000) * 1000)
-    event.event_once(fd, ev_code, handle_io_cb, nil, time)
+    local thread_id = queue_timer(current_thread)
+    event.event_once(fd, EV_TIMEOUT, handle_timer_cb, thread_id, time)
+  else
+    queue_event(current_thread, "idle", fd)
   end
-  queue_event(current_thread, ev_code or "idle", fd)
   if current_thread == "main" then
     event_loop()
   else
