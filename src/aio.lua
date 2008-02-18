@@ -364,7 +364,7 @@ end
 function input(file)
   local f
   if type(file) == "string" then
-    f = aio.open(file, "r")
+    f = open(file, "r")
   elseif f then
     tofile(file)
     f = file
@@ -377,7 +377,7 @@ end
 function output(file)
   local f
   if type(file) == "string" then
-    f = aio.open(file, "w")
+    f = open(file, "w")
   elseif f then
     tofile(file)
     f = file
