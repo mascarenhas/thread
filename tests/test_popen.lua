@@ -3,13 +3,13 @@ require "aio"
 require "thread"
 
 local function tail(file)
-  local f = aio.popen("tail -f " .. file)
+  local f = aio.popen("tail -f " .. file, "r")
   local lines = f:lines()
   local line = lines()
   while line do
     aio.write(line)
     line = lines()
-    thread.yield()
+    thread.yield(10)
   end
 end
 

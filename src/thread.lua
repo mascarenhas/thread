@@ -35,7 +35,6 @@ local timer_threads = {}
 local next_thread
 
 local function handle_event(fd, ev_code, thread_id)
-  print(fd, ev_code, thread_id)
   if ev_code == EV_TIMEOUT then
     next_thread = timer_threads[thread_id]
     timer_threads[thread_id] = nil
@@ -80,7 +79,6 @@ function yield(ev, fd, timeout)
     ev, fd = "timer", ev
   end
   if ev == "read" or ev == "write" then
-    print(ev, fd)
     local ev_code = events[ev]
     local time, thread_id
     if timeout then
