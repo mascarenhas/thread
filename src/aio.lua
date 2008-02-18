@@ -134,7 +134,7 @@ local function aio_read_bytes(fd, n)
       local en = alien.errno()
       if en == EAGAIN then
 	r = 1
-	thread.yield("read", fd)
+	thread.yield("read", fd, 1000)
       else
 	dispose_buffer(buf)
 	return nil, libc.strerror(en)
@@ -158,7 +158,7 @@ local function aio_read_number(fd, stream)
     if libc.ferror(stream) ~= 0 then
       local en = alien.errno()
       if en == EAGAIN then
-	thread.yield("read", fd)
+	thread.yield("read", fd, 1000)
 	return aio_read_number(stream)
       else
 	return nil, libc.strerror(en)
@@ -181,7 +181,7 @@ local function aio_read_line(fd, stream, buf)
       if libc.ferror(stream) ~= 0 then
 	local en = alien.errno()
 	if en == EAGAIN then
-	  thread.yield("read", fd)
+	  thread.yield("read", fd, 1000)
 	else
 	  dispose_buffer(buf)
 	  return nil, libc.strerror(en)
@@ -247,7 +247,7 @@ local function aio_write_item(fd, item)
   if w == -1 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd)
+      thread.yield("write", fd, 1000)
       return aio_write_item(fd, s)
     else
       return false
@@ -304,7 +304,7 @@ local function aio_flush(file)
   if libc.fflush(stream) ~= 0 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd)
+      thread.yield("write", fd, 1000)
       return aio_flush(file)
     else
       return nil, lib.strerror(en)
@@ -334,7 +334,7 @@ local function aio_seek(file, whence, offset)
   if libc.fseek(stream, offset, n_whence) ~= 0 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd)
+      thread.yield("write", fd, 1000)
       return aio_seek(file, whence, offset)
     else
       return nil, lib.strerror(en)
