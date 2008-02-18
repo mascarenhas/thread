@@ -32,17 +32,17 @@ local waiting_threads = {
 
 local timer_threads = {}
 
-local next_thread
+local next_thread = {}
 
 local function handle_event(fd, ev_code, thread_id)
   if ev_code == EV_TIMEOUT then
-    next_thread = timer_threads[thread_id]
+    table.insert(next_thread, 1, timer_threads[thread_id])
     timer_threads[thread_id] = nil
   else
     if thread_id then timer_threads[thread_id] = nil end
     local queue = waiting_threads[ev_code][fd]
     if queue then
-      next_thread = queue[#queue]
+      table.insert(next_thread, 1, queue[#queue])
       queue[#queue] = nil
     else
       error("no thread waiting for event " .. ev_code .. " on fd " .. fd)
@@ -117,8 +117,7 @@ function new(func, ...)
 end
 
 local function get_next()
-  local next = next_thread
-  next_thread = nil
+  local next = table.remove(next_thread)
   if not next then
     next = table.remove(waiting_threads.idle)
   end
