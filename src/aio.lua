@@ -1,7 +1,7 @@
 
-require "alien"
-require "bit"
-require "thread"
+local alien = require "alien"
+local bit = require "bit"
+local thread = require "thread"
 
 module(..., package.seeall)
 
