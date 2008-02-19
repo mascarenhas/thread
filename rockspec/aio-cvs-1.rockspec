@@ -13,10 +13,14 @@ description = {
   homepage = "http://alien.luaforge.net/aio"
 }
 
-dependencies = { "bitlib", "alien cvs" }
+dependencies = { "alien cvs" }
 
 external_dependencies = {
-  LIBEVENT = { header = "event.h" },
+ platforms = {
+  unix = {
+    LIBEVENT = { header = "event.h" }
+  }
+ }
 }
 
 source = {
