@@ -8,14 +8,12 @@ local kernel = alien.kernel32
 
 kernel.WaitForMultipleObjects:types{ abi = "stdcall", 
 				     "int", "pointer", "int", "int"}
-kernel.CreateWaitableTimer:types{ abi = "stdcall",
-				  "pointer", "int", "string"}
+kernel.CreateWaitableTimerA:types{ abi = "stdcall",
+				   "pointer", "int", "pointer" }
 kernel.SetWaitableTimer:types{ abi = "stdcall",
 			       "int", "pointer", "int", 
 			       "pointer", "pointer", "int" }
 kernel.CloseHandle:types{ abi = "stdcall", "int" }
-
-event.event_init()
 
 local WAIT_TIMEOUT = 0x0102
 
@@ -33,14 +31,9 @@ local function handle_event(pos)
   table.insert(next_thread, 1, thr)
   waiting_threads[handle] = nil
   table.remove(wait_handles, pos)
-  local timer = timers[thr]
-  if timer then
-    local t_pos, t_handle = unpack(timer)
-    kernel.CloseHandle(t_handle)
-    if t_pos ~= pos then
-      table.remove(wait_handles, t_pos)
-      waiting_threads[t_handle] = nil
-    end
+  if timers[handle] then
+    kernel.CloseHandle(handle)
+    timers[handle] = nil
   end
 end
 
@@ -50,14 +43,14 @@ local function queue_event(thr, handle)
 end
 
 local function queue_timer(thr, timeout)
-  timeout = timeout * 10000
-  local t = alien.struct.pack("I64", timeout)
-  local handle = kernel.CreateWaitableTimer(nil, 1, nil)
+  timeout = -timeout * 10000
+  local t = alien.struct.pack("LL", timeout, 0xFFFFFFFF) 
+  local handle = kernel.CreateWaitableTimerA(nil, 1, nil)
   local res = kernel.SetWaitableTimer(handle, t, 0, nil, nil, 0) 
   if res ~= 0 then
     local pos = table.insert(wait_handles, handle)
-    timers[thr] = { pos, handle }
     waiting_threads[handle] = thr
+    timers[handle] = true
   else
     error("could not create timer")
   end
@@ -73,9 +66,6 @@ function yield(ev, handle, timeout)
   end
   if ev == "read" or ev == "write" then
     queue_event(current_thread, handle)
-    if timeout then
-      queue_timer(current_thread, timeout)
-    end
   elseif ev == "timer" then
     queue_timer(current_thread, handle)
   else
@@ -109,13 +99,15 @@ local function get_next()
 end
 
 local function run_loop(block)
-  local handles = alien.array("int", wait_handles)
-  local timeout
-  if block then timeout = 0 else timeout = 1 end
-  local res = kernel.WaitForMultipleObjects(#wait_handles, handles, 
-					    0, timeout)
-  if res ~= WAIT_TIMEOUT then
-    handle_event(res + 1)
+  if #wait_handles > 0 then
+    local handles = alien.array("int", wait_handles)
+    local timeout
+    if block then timeout = 0 else timeout = 1 end
+    local res = kernel.WaitForMultipleObjects(#wait_handles, handles.buffer, 
+					      0, 0)
+    if res ~= WAIT_TIMEOUT then
+      handle_event(res + 1)
+    end
   end
 end
 
