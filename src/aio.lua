@@ -2,6 +2,7 @@
 local alien = require "alien"
 local bit = require "bit"
 local thread = require "thread"
+local type = type
 
 module(..., package.seeall)
 
@@ -53,7 +54,7 @@ local function tofile(file)
   if not ok then
     error("not an async IO stream!")
   elseif not stream then
-    error("attempt to use a closed file")
+    error(debug.traceback("attempt to use a closed file"))
   else
     return fd, stream
   end
@@ -69,26 +70,34 @@ local function aio_error(path)
   end
 end
 
+local open_streams = {}
+
 function open(path, mode)
   mode = mode or "r"
   local flags = mode2flags[mode]
   flags = bit.bor(flags, O_NONBLOCK)
-  fd = libc.open(path, flags, DEFFILEMODE)
+  local fd = libc.open(path, flags, DEFFILEMODE)
   if fd ~= -1 then
     local stream = libc.fdopen(fd, mode)
-    local file = alien.wrap("aio_file", fd, stream)
-    return file
+    if stream then
+      open_streams[fd] = stream
+      local file = alien.wrap("aio_file", fd, stream)
+      return file
+    else
+      return aio_error(path)
+    end
   else
     return aio_error(path)
   end
 end
 
 function close(file)
-  local fd, stream = tofile(file)
+  local fd, stream = alien.unwrap("aio_file", file)
   if stream then
     local status = libc.close(fd)
     if status ~= -1 then
-      alien.rewrap("aio_file", file, fd, nil)
+      open_streams[fd] = nil
+      alien.rewrap("aio_file", file, -1, nil)
       return true
     else
       return aio_error()
@@ -98,7 +107,7 @@ function close(file)
 end
 
 function _M.type(file)
-  local ok, fd, stream = pcall(alien.unwrap, file)
+  local ok, fd, stream = pcall(alien.unwrap, "aio_file", file)
   if not ok then
     return nil
   elseif stream then
@@ -123,6 +132,8 @@ local function dispose_buffer(buf)
   table.insert(buffer_queue, buf)
 end
 
+local ___i = 0
+
 local function aio_read_bytes(fd, n)
   local buf = get_buffer()
   local out = {}
@@ -134,18 +145,18 @@ local function aio_read_bytes(fd, n)
       local en = alien.errno()
       if en == EAGAIN then
 	r = 1
-	thread.yield("read", fd, 1000)
+	thread.yield("read", fd)
       else
 	dispose_buffer(buf)
 	return nil, libc.strerror(en)
       end
     else
-      out[#out + 1] = buf:tostring(r)
+      if r > 0 then out[#out + 1] = buf:tostring(r) end
       n = n - r
     end
   end
   dispose_buffer(buf)
-  return table.concat(out)
+  if #out > 0 then return table.concat(out) else return nil end
 end
 
 local function aio_read_all(fd)
@@ -158,7 +169,7 @@ local function aio_read_number(fd, stream)
     if libc.ferror(stream) ~= 0 then
       local en = alien.errno()
       if en == EAGAIN then
-	thread.yield("read", fd, 1000)
+	thread.yield("read", fd)
 	return aio_read_number(stream)
       else
 	return nil, libc.strerror(en)
@@ -181,7 +192,7 @@ local function aio_read_line(fd, stream, buf)
       if libc.ferror(stream) ~= 0 then
 	local en = alien.errno()
 	if en == EAGAIN then
-	  thread.yield("read", fd, 1000)
+	  thread.yield("read", fd)
 	else
 	  dispose_buffer(buf)
 	  return nil, libc.strerror(en)
@@ -199,7 +210,7 @@ local function aio_read_line(fd, stream, buf)
 	return res .. (next or "")
       else
 	dispose_buffer(buf)
-	return res
+	return res:sub(1, #res - 1)
       end
     end
   end
@@ -247,7 +258,7 @@ local function aio_write_item(fd, item)
   if w == -1 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd, 1000)
+      thread.yield("write", fd)
       return aio_write_item(fd, s)
     else
       return false
@@ -304,7 +315,7 @@ local function aio_flush(file)
   if libc.fflush(stream) ~= 0 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd, 1000)
+      thread.yield("write", fd)
       return aio_flush(file)
     else
       return nil, lib.strerror(en)
@@ -334,7 +345,7 @@ local function aio_seek(file, whence, offset)
   if libc.fseek(stream, offset, n_whence) ~= 0 then
     local en = alien.errno()
     if en == EAGAIN then
-      thread.yield("write", fd, 1000)
+      thread.yield("write", fd)
       return aio_seek(file, whence, offset)
     else
       return nil, lib.strerror(en)
