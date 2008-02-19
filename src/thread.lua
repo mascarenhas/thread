@@ -131,9 +131,12 @@ function yield(ev, fd, timeout)
   end
 end
 
-function new(func, ...)
+function new(func, err, ...)
   local args = { ... }
-  local t = coroutine.wrap(function () return func(unpack(args)) end)
+  local t = { co = coroutine.wrap(function () return func(unpack(args)) end) }
+  if err then
+    t.err = function (msg) return err(msg, unpack(args)) end
+  end
   queue_event(t, "idle")
   queue_event(current_thread, "idle")
   if current_thread == "main" then
@@ -154,7 +157,6 @@ end
 function event_loop()
   local block = EVLOOP_NONBLOCK
   while true do
-    if block == EVLOOP_ONCE then print("block") end
     event.event_loop(block)
     block = EVLOOP_NONBLOCK
     local next = get_next()
@@ -162,9 +164,13 @@ function event_loop()
     if not next then
       block = EVLOOP_ONCE
     elseif next == "main" then
-      return 
-    else 
-      next()
+      return
+    else
+      if next.err then
+	xpcall(next.co, next.err)
+      else
+	next.co()
+      end
     end
   end
 end
@@ -176,11 +182,6 @@ local function socket_send(self, data, from, to)
   local lastIndex = from - 1
   repeat
     s, err, lastIndex = client:send(data, lastIndex + 1, to)
-    -- adds extra corrotine swap
-    -- garantees that high throuput dont take other threads to starvation
-    if (math.random(100) > 90) then
-      thread.yield()
-    end
     if s or err ~= "timeout" then
       return s, err, lastIndex
     end
