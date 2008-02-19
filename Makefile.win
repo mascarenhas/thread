@@ -1,0 +1,9 @@
+
+all:
+
+install:
+	IF NOT EXIST "$(LUA_DIR)\" mkdir -p "$(LUA_DIR)\"
+	copy src/windows/*.lua "$(LUA_DIR)\"
+	xcopy /E /S tests "$(PREFIX)\tests\"
+	xcopy /E /S doc "$(PREFIX)\doc\"
+
