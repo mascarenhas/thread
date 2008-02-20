@@ -1,19 +1,20 @@
 
-require "alien"
-require "alien.struct"
+local alien = require "alien"
+local struct = require "alien.struct"
+local table = table
 
 module("thread", package.seeall)
 
-local event = alien.event
+local libevent = alien.event
 
-event.event_init:types("pointer")
-event.event_set:types("void", "pointer", "int", "int", "callback", "string")
-event.event_add:types("int", "pointer", "pointer")
-event.event_dispatch:types("int")
-event.event_once:types("int", "int", "int", "callback", "pointer", "string")
-event.event_loop:types("int", "int")
+libevent.event_init:types("pointer")
+libevent.event_set:types("void", "pointer", "int", "int", "callback", "string")
+libevent.event_add:types("int", "pointer", "pointer")
+libevent.event_dispatch:types("int")
+libevent.event_once:types("int", "int", "int", "callback", "pointer", "string")
+libevent.event_loop:types("int", "int")
 
-event.event_init()
+libevent.event_init()
 
 require("event_constants")
 
@@ -106,21 +107,24 @@ function yield(ev, fd, timeout)
     local ev_code = events[ev]
     local time
     if timeout then
-      time = alien.struct.pack("ll", math.floor(timeout / 1000),
-			       (timeout % 1000) * 1000)
+      time = struct.pack("ll", math.floor(timeout / 1000),
+			 (timeout % 1000) * 1000)
       queue_timer(current_thread)
     end
     local thread_id = tostring(current_thread)
     local evobj = get_event(thread_id)
-    event.event_set(evobj, fd, ev_code, handle_event_cb, thread_id)
-    event.event_add(evobj, nil)
+    libevent.event_set(evobj, fd, ev_code, handle_event_cb, thread_id)
+    libevent.event_add(evobj, nil)
     queue_event(current_thread, ev_code, fd)
   elseif ev == "timer" then
     fd, timeout = -1, fd
-    local time = alien.struct.pack("ll", math.floor(timeout / 1000),
-				   (timeout % 1000) * 1000)
+    local time = struct.pack("ll", math.floor(timeout / 1000),
+			     (timeout % 1000) * 1000)
     local thread_id = queue_timer(current_thread)
-    event.event_once(fd, EV_TIMEOUT, handle_event_cb, thread_id, time)
+    libevent.event_once(fd, EV_TIMEOUT, handle_event_cb, thread_id, time)
+  elseif ev = "cv" then
+    local cv = fd
+    table.insert(cv, current_thread) 
   else
     queue_event(current_thread, "idle", fd)
   end
@@ -129,6 +133,22 @@ function yield(ev, fd, timeout)
   else
     coroutine.yield()
   end
+end
+
+function signal(cv)
+  for _, thr in ipairs(cv) do
+    queue_event(thr, "idle")
+  end
+  queue_event(current_thread, "idle")
+  if current_thread == "main" then
+    event_loop()
+  else
+    coroutine.yield()
+  end
+end
+
+function cv()
+   return {}
 end
 
 function new(func, err, ...)
@@ -157,7 +177,7 @@ end
 function event_loop()
   local block = EVLOOP_NONBLOCK
   while true do
-    event.event_loop(block)
+    libevent.event_loop(block)
     block = EVLOOP_NONBLOCK
     local next = get_next()
     current_thread = next
