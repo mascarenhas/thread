@@ -21,6 +21,8 @@ src/event_constants.c: src/event_constants.def
 
 install:
 	cp src/*.lua $(LUA_DIR)
+	mkdir -p $(LUA_DIR)/thread
+	cp src/thread/*.lua $(LUA_DIR)/thread
 	cp -r tests $(PREFIX)/
 	cp -r doc $(PREFIX)/
 

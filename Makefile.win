@@ -3,7 +3,9 @@ all:
 
 install:
 	IF NOT EXIST "$(LUA_DIR)\" mkdir -p "$(LUA_DIR)\"
+	IF NOT EXIST "$(LUA_DIR)\" mkdir -p "$(LUA_DIR)\thread"
 	copy src\windows\*.lua "$(LUA_DIR)\"
+	copy src\thread\*.lua "$(LUA_DIR)\thread"
 	xcopy /E /S tests "$(PREFIX)\tests\"
 	xcopy /E /S doc "$(PREFIX)\doc\"
 
