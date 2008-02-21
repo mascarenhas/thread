@@ -23,8 +23,6 @@ local events = {
   write = EV_WRITE,
 }
 
-local current_thread = "main"
-
 local waiting_threads = {
   [EV_READ] = {},
   [EV_WRITE] = {},
@@ -99,7 +97,16 @@ local function queue_timer(thr)
   return thread_id
 end
 
-function yield(ev, fd, timeout)
+function yield(...)
+   if coroutine.running() then
+      coroutine.yield(...)
+   else
+      handle_yield("main", ...)
+      event_loop()
+   end
+end
+
+function handle_yield(thr, ev, fd, timeout)
   if type(ev) == "number" then
     ev, fd = "timer", ev
   end
@@ -109,29 +116,24 @@ function yield(ev, fd, timeout)
     if timeout then
       time = struct.pack("ll", math.floor(timeout / 1000),
 			 (timeout % 1000) * 1000)
-      queue_timer(current_thread)
+      queue_timer(thr)
     end
-    local thread_id = tostring(current_thread)
+    local thread_id = tostring(thr)
     local evobj = get_event(thread_id)
     libevent.event_set(evobj, fd, ev_code, handle_event_cb, thread_id)
     libevent.event_add(evobj, nil)
-    queue_event(current_thread, ev_code, fd)
+    queue_event(thr, ev_code, fd)
   elseif ev == "timer" then
     fd, timeout = -1, fd
     local time = struct.pack("ll", math.floor(timeout / 1000),
 			     (timeout % 1000) * 1000)
-    local thread_id = queue_timer(current_thread)
+    local thread_id = queue_timer(thr)
     libevent.event_once(fd, EV_TIMEOUT, handle_event_cb, thread_id, time)
-  elseif ev = "cv" then
+  elseif ev == "cv" then
     local cv = fd
-    table.insert(cv, current_thread) 
+    table.insert(cv, thr) 
   else
-    queue_event(current_thread, "idle", fd)
-  end
-  if current_thread == "main" then
-    event_loop()
-  else
-    coroutine.yield()
+    queue_event(thr, "idle", fd)
   end
 end
 
@@ -139,11 +141,11 @@ function signal(cv)
   for _, thr in ipairs(cv) do
     queue_event(thr, "idle")
   end
-  queue_event(current_thread, "idle")
-  if current_thread == "main" then
-    event_loop()
+  if coroutine.running() then 
+     yield()
   else
-    coroutine.yield()
+     queue_event("main", "idle")
+     event_loop()
   end
 end
 
@@ -151,18 +153,15 @@ function cv()
    return {}
 end
 
-function new(func, err, ...)
+function new(func, ...)
   local args = { ... }
-  local t = { co = coroutine.wrap(function () return func(unpack(args)) end) }
-  if err then
-    t.err = function (msg) return err(msg, unpack(args)) end
-  end
+  local t = coroutine.create(function () return func(unpack(args)) end)
   queue_event(t, "idle")
-  queue_event(current_thread, "idle")
-  if current_thread == "main" then
-    event_loop()
+  if coroutine.running() then 
+     yield()
   else
-    coroutine.yield()
+     queue_event("main", "idle")
+     event_loop()
   end
 end
 
@@ -175,24 +174,26 @@ local function get_next()
 end
 
 function event_loop()
-  local block = EVLOOP_NONBLOCK
-  while true do
-    libevent.event_loop(block)
-    block = EVLOOP_NONBLOCK
-    local next = get_next()
-    current_thread = next
-    if not next then
-      block = EVLOOP_ONCE
-    elseif next == "main" then
-      return
-    else
-      if next.err then
-	xpcall(next.co, next.err)
+   local block = EVLOOP_NONBLOCK
+   while true do
+      libevent.event_loop(block)
+      block = EVLOOP_NONBLOCK
+      local next = get_next()
+      if not next then
+	 block = EVLOOP_ONCE
+      elseif next == "main" then
+	 return
       else
-	next.co()
+	 local status, ev, obj, time = coroutine.resume(next)
+	 if status then
+	    if coroutine.status(next) == "suspended" then
+	       handle_yield(next, ev, obj, time)
+	    end
+	 else
+	    error(ev)
+	 end
       end
-    end
-  end
+   end
 end
 
 local function socket_send(self, data, from, to)

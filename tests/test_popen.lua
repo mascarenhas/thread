@@ -7,7 +7,7 @@ local function tail(file)
   local lines = f:lines()
   local line = lines()
   while line do
-    aio.write(line)
+    aio.write(line, "\n")
     line = lines()
     thread.yield()
   end
