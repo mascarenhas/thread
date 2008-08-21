@@ -132,8 +132,6 @@ local function dispose_buffer(buf)
   table.insert(buffer_queue, buf)
 end
 
-local ___i = 0
-
 local function aio_read_bytes(fd, n)
   local buf = get_buffer()
   local out = {}
@@ -170,7 +168,7 @@ local function aio_read_number(fd, stream)
       local en = alien.errno()
       if en == EAGAIN then
 	thread.yield("read", fd)
-	return aio_read_number(stream)
+	return aio_read_number(fd, stream)
       else
 	return nil, libc.strerror(en)
       end
@@ -204,7 +202,7 @@ local function aio_read_line(fd, stream, buf)
     else
       local res = buf:tostring()
       if not res:sub(#res) == "\n" then
-	local next, err = aio_read_line(stream, buf)
+	local next, err = aio_read_line(fd, stream, buf)
 	if err then return nil, err end
 	dispose_buffer(buf)
 	return res .. (next or "")
