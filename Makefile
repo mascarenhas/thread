@@ -31,4 +31,4 @@ clean:
 
 upload:
 	darcs dist -d aio-current
-	ncftpput -u mascarenhas ftp.luaforge.net alien/htdocs aio-current.tar.gz
+	scp aio-current.tar.gz mascarenhas@www.lua.inf.puc-rio.br:public_html/
