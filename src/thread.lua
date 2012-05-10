@@ -121,7 +121,7 @@ function handle_yield(thr, ev, fd, timeout)
     local thread_id = tostring(thr)
     local evobj = get_event(thread_id)
     libevent.event_set(evobj, fd, ev_code, handle_event_cb, thread_id)
-    libevent.event_add(evobj, nil)
+    libevent.event_add(evobj, time)
     queue_event(thr, ev_code, fd)
   elseif ev == "timer" then
     fd, timeout = -1, fd
