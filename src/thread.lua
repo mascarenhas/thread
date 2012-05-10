@@ -103,7 +103,7 @@ function yield(...)
       coroutine.yield(...)
    else
       handle_yield("main", ...)
-      event_loop()
+      return event_loop()
    end
 end
 
@@ -146,7 +146,7 @@ function signal(cv)
      yield()
   else
      queue_event("main", "idle")
-     event_loop()
+     return event_loop()
   end
 end
 
@@ -162,7 +162,7 @@ function new(func, ...)
      yield()
   else
      queue_event("main", "idle")
-     event_loop()
+     return event_loop()
   end
 end
 
