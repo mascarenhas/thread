@@ -1,5 +1,6 @@
 
-local alien = require "alien"
+require "alien"
+
 local bit = require "bit"
 local thread = require "thread"
 local type = type

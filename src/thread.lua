@@ -1,5 +1,6 @@
 
-local alien = require "alien"
+require "alien"
+
 local struct = require "alien.struct"
 local table = table
 
