@@ -1,11 +1,9 @@
 
-require "alien"
+local alien = require "alien"
 
-local bit = require "bit"
 local thread = require "thread"
-local type = type
 
-module(..., package.seeall)
+local aio = {}
 
 local file_meta = alien.tag("aio_file")
 
@@ -28,26 +26,26 @@ libc.fflush:types("int", "pointer")
 libc.fseek:types("int", "pointer", "int", "int")
 libc.setvbuf:types("int", "pointer", "string", "int", "int")
 
-require("aio_constants")
+local codes = require("aio_constants")
 
 local STDIN, STDOUT, STDERR = 0, 1, 2
 
 local mode2flags = {
-  ["r"] = O_RDONLY,
-  ["rb"] = O_RDONLY,
-  ["r+"] = bit.bor(O_RDWR, O_CREAT),
-  ["rb+"] = bit.bor(O_RDWR, O_CREAT),
-  ["r+b"] = bit.bor(O_RDWR, O_CREAT),
-  ["w"] = bit.bor(O_WRONLY, O_CREAT, O_TRUNC),
-  ["wb"] = bit.bor(O_WRONLY, O_CREAT, O_TRUNC),
-  ["a"] = bit.bor(O_WRONLY, O_CREAT, O_APPEND),
-  ["ab"] = bit.bor(O_WRONLY, O_CREAT, O_APPEND),
-  ["w+"] = bit.bor(O_RDWR, O_CREAT, O_TRUNC),
-  ["wb"] = bit.bor(O_RDWR, O_CREAT, O_TRUNC),
-  ["w+b"] = bit.bor(O_RDWR, O_CREAT, O_TRUNC),
-  ["a+"] = bit.bor(O_RDWR, O_CREAT, O_APPEND),
-  ["ab+"] = bit.bor(O_RDWR, O_CREAT, O_APPEND),
-  ["a+b"] = bit.bor(O_RDWR, O_CREAT, O_APPEND)
+  ["r"] = codes.O_RDONLY,
+  ["rb"] = codes.O_RDONLY,
+  ["r+"] = codes.O_RDWR | codes.O_CREAT,
+  ["rb+"] = codes.O_RDWR | codes.O_CREAT,
+  ["r+b"] = codes.O_RDWR | codes.O_CREAT,
+  ["w"] = codes.O_WRONLY | codes.O_CREAT | codes.O_TRUNC,
+  ["wb"] = codes.O_WRONLY | codes.O_CREAT | codes.O_TRUNC,
+  ["a"] = codes.O_WRONLY | codes.O_CREAT | codes.O_APPEND,
+  ["ab"] = codes.O_WRONLY | codes.O_CREAT | codes.O_APPEND,
+  ["w+"] = codes.O_RDWR | codes.O_CREAT | codes.O_TRUNC,
+  ["wb"] = codes.O_RDWR | codes.O_CREAT | codes.O_TRUNC,
+  ["w+b"] = codes.O_RDWR | codes.O_CREAT | codes.O_TRUNC,
+  ["a+"] = codes.O_RDWR | codes.O_CREAT | codes.O_APPEND,
+  ["ab+"] = codes.O_RDWR | codes.O_CREAT | codes.O_APPEND,
+  ["a+b"] = codes.O_RDWR | codes.O_CREAT | codes.O_APPEND
 }
 
 local function tofile(file)
@@ -55,7 +53,7 @@ local function tofile(file)
   if not ok then
     error("not an async IO stream!")
   elseif not stream then
-    error(debug.traceback("attempt to use a closed file"))
+    error("attempt to use a closed file")
   else
     return fd, stream
   end
@@ -73,11 +71,11 @@ end
 
 local open_streams = {}
 
-function open(path, mode)
+function aio.open(path, mode)
   mode = mode or "r"
   local flags = mode2flags[mode]
-  flags = bit.bor(flags, O_NONBLOCK)
-  local fd = libc.open(path, flags, DEFFILEMODE)
+  flags = flags | codes.O_NONBLOCK
+  local fd = libc.open(path, flags, codes.DEFFILEMODE)
   if fd ~= -1 then
     local stream = libc.fdopen(fd, mode)
     if stream then
@@ -92,7 +90,7 @@ function open(path, mode)
   end
 end
 
-function close(file)
+function aio.close(file)
   local fd, stream = alien.unwrap("aio_file", file)
   if stream then
     local status = libc.close(fd)
@@ -107,7 +105,7 @@ function close(file)
   return true
 end
 
-function _M.type(file)
+function aio.type(file)
   local ok, fd, stream = pcall(alien.unwrap, "aio_file", file)
   if not ok then
     return nil
@@ -123,7 +121,7 @@ setmetatable(buffer_queue, { __mode = "v" })
 
 local function get_buffer()
   if #buffer_queue == 0 then
-    return alien.buffer(BUFSIZ)
+    return alien.buffer(codes.BUFSIZ)
   else
     return table.remove(buffer_queue)
   end
@@ -138,11 +136,11 @@ local function aio_read_bytes(fd, n)
   local out = {}
   local r = n
   while n > 0 and r > 0 do
-    local size = math.min(n, BUFSIZ)
+    local size = math.min(n, codes.BUFSIZ)
     r = libc.read(fd, buf, size)
     if r == -1 then
       local en = alien.errno()
-      if en == EAGAIN then
+      if en == codes.EAGAIN then
 	r = 1
 	thread.yield("read", fd)
       else
@@ -159,7 +157,7 @@ local function aio_read_bytes(fd, n)
 end
 
 local function aio_read_all(fd)
-  return aio_read_bytes(fd, MAXINT)
+  return aio_read_bytes(fd, codes.MAXINT)
 end
 
 local function aio_read_number(fd, stream)
@@ -167,11 +165,11 @@ local function aio_read_number(fd, stream)
   if n == -1 then
     if libc.ferror(stream) ~= 0 then
       local en = alien.errno()
-      if en == EAGAIN then
-	thread.yield("read", fd)
-	return aio_read_number(fd, stream)
+      if en == codes.EAGAIN then
+	      thread.yield("read", fd)
+	      return aio_read_number(fd, stream)
       else
-	return nil, libc.strerror(en)
+	      return nil, libc.strerror(en)
       end
     else
       return nil
@@ -186,30 +184,30 @@ end
 local function aio_read_line(fd, stream, buf)
   buf = buf or get_buffer()
   while true do
-    local n = libc.fgets(buf, BUFSIZ, stream)
+    local n = libc.fgets(buf, codes.BUFSIZ, stream)
     if n == 0 then
       if libc.ferror(stream) ~= 0 then
-	local en = alien.errno()
-	if en == EAGAIN then
-	  thread.yield("read", fd)
-	else
-	  dispose_buffer(buf)
-	  return nil, libc.strerror(en)
-	end
+	      local en = alien.errno()
+	      if en == codes.EAGAIN then
+	        thread.yield("read", fd)
+	      else
+	        dispose_buffer(buf)
+	        return nil, libc.strerror(en)
+	      end
       else
-	dispose_buffer(buf)
-	return nil
+	      dispose_buffer(buf)
+	      return nil
       end
     else
       local res = buf:tostring()
       if not res:sub(#res) == "\n" then
-	local next, err = aio_read_line(fd, stream, buf)
-	if err then return nil, err end
-	dispose_buffer(buf)
-	return res .. (next or "")
+	      local next, err = aio_read_line(fd, stream, buf)
+	      if err then return nil, err end
+	      dispose_buffer(buf)
+	      return res .. (next or "")
       else
-	dispose_buffer(buf)
-	return res:sub(1, #res - 1)
+	      dispose_buffer(buf)
+	      return res:sub(1, #res - 1)
       end
     end
   end
@@ -242,12 +240,12 @@ local function aio_read(file, ...)
       local what = select(i, ...)
       items[#items + 1] = aio_read_item(fd, stream, what)
     end
-    return unpack(items)
+    return table.unpack(items)
   end
 end
 
-function read(...)
-  return aio_read(stdin, ...)
+function aio.read(...)
+  return aio_read(aio.stdin, ...)
 end
 
 local function aio_write_item(fd, item)
@@ -256,7 +254,7 @@ local function aio_write_item(fd, item)
   local w = libc.write(fd, s, size)
   if w == -1 then
     local en = alien.errno()
-    if en == EAGAIN then
+    if en == codes.EAGAIN then
       thread.yield("write", fd)
       return aio_write_item(fd, s)
     else
@@ -281,27 +279,27 @@ local function aio_write(file, ...)
   end
 end
 
-function write(...)
-  return aio_write(stdout, ...)
+function aio.write(...)
+  return aio_write(aio.stdout, ...)
 end
 
-function lines(file)
-  file = file or stdin
+function aio.lines(file)
+  file = file or aio.stdin
   if type(file) == "string" then
-    file = open(file, "r")
+    file = aio.open(file, "r")
   end
   return function ()
 	   return file:read("*l")
 	 end
 end
 
-function popen(cmd, mode)
+function aio.popen(cmd, mode)
   mode = mode or "r"
   local stream = libc.popen(cmd, mode)
   if stream then
     local fd = libc.fileno(stream)
-    local status = libc.fcntl(fd, F_GETFL, 0)
-    status = libc.fcntl(fd, F_SETFL, bit.bor(status, O_NONBLOCK))
+    local status = libc.fcntl(fd, codes.F_GETFL, 0)
+    status = libc.fcntl(fd, codes.F_SETFL, status | codes.O_NONBLOCK)
     if status ~= -1 then
       return alien.wrap("aio_file", fd, stream)
     end
@@ -313,19 +311,19 @@ local function aio_flush(file)
   local fd, stream = tofile(file)
   if libc.fflush(stream) ~= 0 then
     local en = alien.errno()
-    if en == EAGAIN then
+    if en == codes.EAGAIN then
       thread.yield("write", fd)
       return aio_flush(file)
     else
-      return nil, lib.strerror(en)
+      return nil, libc.strerror(en)
     end
   else
     return true
   end
 end
 
-function flush()
-  return aio_flush(stdout)
+function aio.flush()
+  return aio_flush(aio.stdout)
 end
 
 local seek_whence = {
@@ -343,11 +341,11 @@ local function aio_seek(file, whence, offset)
   local fd, stream = tofile(file)
   if libc.fseek(stream, offset, n_whence) ~= 0 then
     local en = alien.errno()
-    if en == EAGAIN then
+    if en == codes.EAGAIN then
       thread.yield("write", fd)
       return aio_seek(file, whence, offset)
     else
-      return nil, lib.strerror(en)
+      return nil, libc.strerror(en)
     end
   else
     return true
@@ -371,59 +369,61 @@ local function aio_setvbuf(file, mode, size)
   end
 end
 
-function input(file)
+function aio.input(file)
   local f
   if type(file) == "string" then
-    f = open(file, "r")
+    f = aio.open(file, "r")
   elseif f then
     tofile(file)
     f = file
   else
-    f = stdin
+    f = aio.stdin
   end
-  stdin = f
+  aio.stdin = f
 end
 
-function output(file)
+function aio.output(file)
   local f
   if type(file) == "string" then
-    f = open(file, "w")
+    f = aio.open(file, "w")
   elseif f then
     tofile(file)
     f = file
   else
-    f = stdout
+    f = aio.stdout
   end
-  stdout = f
+  aio.stdout = f
 end
 
-file_meta.__gc = close
+file_meta.__gc = aio.close
 
 file_meta.__index = {
   read = aio_read,
   write = aio_write,
-  close = close,
-  lines = lines,
+  close = aio.close,
+  lines = aio.lines,
   flush = aio_flush,
   seek = aio_seek,
   setvbuf = aio_setvbuf
 }
 
 do
-  local status = libc.fcntl(STDIN, F_GETFL, 0)
-  if libc.fcntl(STDIN, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
-    error("could not set stdin to not block")
+  local status = libc.fcntl(STDIN, codes.F_GETFL, 0)
+  if libc.fcntl(STDIN, codes.F_SETFL, status | codes.O_NONBLOCK) == -1 then
+    assert(aio_error("could not set stdin to not block"))
   end
-  local status = libc.fcntl(STDOUT, F_GETFL, 0)
-  if libc.fcntl(STDOUT, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
-    error("could not set stdout to not block")
+  local status = libc.fcntl(STDOUT, codes.F_GETFL, 0)
+  if libc.fcntl(STDOUT, codes.F_SETFL, status | codes.O_NONBLOCK) == -1 then
+    assert(aio_error("could not set stdout to not block"))
   end
-  local status = libc.fcntl(STDERR, F_GETFL, 0)
-  if libc.fcntl(STDERR, F_SETFL, bit.bor(status, O_NONBLOCK)) == -1 then
-    error("could not set stderr to not block")
+  local status = libc.fcntl(STDERR, codes.F_GETFL, 0)
+  if libc.fcntl(STDERR, codes.F_SETFL, status | codes.O_NONBLOCK) == -1 then
+    assert(aio_error("could not set stderr to not block"))
   end
 end
 
-stdin = alien.wrap("aio_file", STDIN, libc.fdopen(STDIN, "r"))
-stdout = alien.wrap("aio_file", STDOUT, libc.fdopen(STDOUT, "w"))
-stderr = alien.wrap("aio_file", STDERR, libc.fdopen(STDERR, "w"))
+aio.stdin = alien.wrap("aio_file", STDIN, libc.fdopen(STDIN, "r"))
+aio.stdout = alien.wrap("aio_file", STDOUT, libc.fdopen(STDOUT, "w"))
+aio.stderr = alien.wrap("aio_file", STDERR, libc.fdopen(STDERR, "w"))
+
+return aio

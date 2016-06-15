@@ -1,12 +1,10 @@
 
-require "alien"
+local alien = require "alien"
+local coroutine = require "taggedcoro"
 
-local struct = require "alien.struct"
-local table = table
+local thread = { TAG = "thread" }
 
-module("thread", package.seeall)
-
-local libevent = alien.event
+local libevent = alien.load("event")
 
 libevent.event_init:types("pointer")
 libevent.event_set:types("void", "pointer", "int", "int", "callback", "string")
@@ -17,18 +15,22 @@ libevent.event_loop:types("int", "int")
 
 libevent.event_init()
 
-require("event_constants")
+local evcodes = require("event_constants")
 
 local events = {
-  read = EV_READ,
-  write = EV_WRITE,
+  read = evcodes.EV_READ,
+  write = evcodes.EV_WRITE,
 }
 
+local live_threads = setmetatable({}, { __mode = "v" })
+
 local waiting_threads = {
-  [EV_READ] = {},
-  [EV_WRITE] = {},
+  [evcodes.EV_READ] = {},
+  [evcodes.EV_WRITE] = {},
   idle = {}
 }
+
+local cvs = setmetatable({}, { __mode = "v" })
 
 local event_cache = {}
 
@@ -37,7 +39,7 @@ local events_in_use = {}
 local function get_event(thread_id)
   local ev = table.remove(event_cache)
   if not ev then
-    ev = alien.buffer(EV_SIZE)
+    ev = alien.buffer(evcodes.EV_SIZE)
   end
   events_in_use[thread_id] = ev
   return ev
@@ -56,7 +58,7 @@ local timer_threads = {}
 local next_thread = {}
 
 local function handle_event(fd, ev_code, thread_id)
-  if ev_code == EV_TIMEOUT then
+  if ev_code == evcodes.EV_TIMEOUT then
     table.insert(next_thread, 1, timer_threads[thread_id])
     timer_threads[thread_id] = nil
   else
@@ -75,8 +77,7 @@ local function handle_event(fd, ev_code, thread_id)
   return 0
 end
 
-local handle_event_cb = alien.callback(handle_event, "void", "int", "int",
-				       "string")
+local handle_event_cb = alien.callback(handle_event, "void", "int", "int", "string")
 
 local function queue_event(thr, ev_code, fd)
   local queue
@@ -85,7 +86,7 @@ local function queue_event(thr, ev_code, fd)
   else
     queue = waiting_threads[ev_code]
   end
-  if not queue then 
+  if not queue then
     queue = {}
     waiting_threads[ev_code][fd] = queue
   end
@@ -98,16 +99,20 @@ local function queue_timer(thr)
   return thread_id
 end
 
-function yield(...)
-   if coroutine.running() then
-      coroutine.yield(...)
+function thread.yield(...)
+   if coroutine.isyieldable(thread.TAG) then
+      coroutine.yield(thread.TAG, ...)
    else
-      handle_yield("main", ...)
-      return event_loop()
+      thread.handle_yield("main", ...)
+      return thread.event_loop()
    end
 end
 
-function handle_yield(thr, ev, fd, timeout)
+function thread.sleep(ms)
+  thread.yield("timer", ms)
+end
+
+function thread.handle_yield(thr, ev, fd, timeout)
   if type(ev) == "number" then
     ev, fd = "timer", ev
   end
@@ -115,8 +120,7 @@ function handle_yield(thr, ev, fd, timeout)
     local ev_code = events[ev]
     local time
     if timeout then
-      time = struct.pack("ll", math.floor(timeout / 1000),
-			 (timeout % 1000) * 1000)
+      time = alien.pack("ll", math.floor(timeout / 1000), (timeout % 1000) * 1000)
       queue_timer(thr)
     end
     local thread_id = tostring(thr)
@@ -126,44 +130,52 @@ function handle_yield(thr, ev, fd, timeout)
     queue_event(thr, ev_code, fd)
   elseif ev == "timer" then
     fd, timeout = -1, fd
-    local time = struct.pack("ll", math.floor(timeout / 1000),
-			     (timeout % 1000) * 1000)
+    local time = alien.pack("ll", math.floor(timeout / 1000), (timeout % 1000) * 1000)
     local thread_id = queue_timer(thr)
-    libevent.event_once(fd, EV_TIMEOUT, handle_event_cb, thread_id, time)
+    libevent.event_once(fd, evcodes.EV_TIMEOUT, handle_event_cb, thread_id, time)
   elseif ev == "cv" then
     local cv = fd
-    table.insert(cv, thr) 
+    cv[thr] = true
+  elseif ev == "cvs" then
+    local cvs = fd
+    for _, cv in ipairs(cvs) do
+      cv[thr] = true
+    end
   else
     queue_event(thr, "idle", fd)
   end
 end
 
-function signal(cv)
-  for _, thr in ipairs(cv) do
+function thread.signal(cv)
+  local awake = {}
+  for thr, _ in pairs(cv) do
+    awake[#awake+1] = thr
     queue_event(thr, "idle")
   end
-  if coroutine.running() then 
-     yield()
-  else
-     queue_event("main", "idle")
-     return event_loop()
+  for _, thr in ipairs(awake) do
+    for _, cv in ipairs(cvs) do
+      cv[thr] = nil
+    end
   end
+  thread.yield("idle")
 end
 
-function cv()
-   return {}
+function thread.cv()
+  local cv = {}
+  cvs[#cvs+1] = cv
+  return cv
 end
 
-function new(func, ...)
+function thread.new(func, ...)
   local args = { ... }
-  local t = coroutine.create(function () return func(unpack(args)) end)
+  local t = coroutine.wrap(function () return "dead", func(table.unpack(args)) end, thread.TAG)
+  live_threads[t] = true
   queue_event(t, "idle")
-  if coroutine.running() then 
-     yield()
-  else
-     queue_event("main", "idle")
-     return event_loop()
-  end
+  thread.yield("idle")
+end
+
+function thread.join()
+  thread.yield()
 end
 
 local function get_next()
@@ -174,27 +186,34 @@ local function get_next()
   return next
 end
 
-function event_loop()
-   local block = EVLOOP_NONBLOCK
+function thread.event_loop()
+   local block = evcodes.EVLOOP_NONBLOCK
    while true do
       libevent.event_loop(block)
-      block = EVLOOP_NONBLOCK
+      block = evcodes.EVLOOP_NONBLOCK
       local next = get_next()
       if not next then
-	 block = EVLOOP_ONCE
+     	  block = evcodes.EVLOOP_ONCE
       elseif next == "main" then
-	 return
+	      return
       else
-	 local status, ev, obj, time = coroutine.resume(next)
-	 if status then
-	    if coroutine.status(next) == "suspended" then
-	       handle_yield(next, ev, obj, time)
+	      local ev, obj, time = next()
+        if ev ~= "dead" then
+          thread.handle_yield(next, ev, obj, time)
+        else
+          live_threads[next] = nil
+        end
 	    end
-	 else
-	    error(ev)
-	 end
-      end
    end
+end
+
+function thread.join()
+  if coroutine.isyieldable(thread.TAG) then
+    return error("cannot join outside main thread")
+  end
+  repeat
+    thread.yield()
+  until not next(live_threads)
 end
 
 local function socket_send(self, data, from, to)
@@ -257,16 +276,18 @@ local socket_wrapped = { receive = socket_receive, send = socket_send,
 			 accept = socket_accept, connect = socket_connect }
 
 local socket_mt = { __index = function (skt, name)
-				return socket_wrapped[name] or 
-				  function (wrpd_skt, ...)
-				    return rawget(skt, "socket")[name](wrpd_skt.socket, ...)
-				  end
-			      end }
+                                return socket_wrapped[name] or
+				                          function (wrpd_skt, ...)
+				                            return rawget(skt, "socket")[name](wrpd_skt.socket, ...)
+				                          end
+			                        end }
 
 
-function wrap_socket(skt)
+function thread.wrap_socket(skt)
   local wrapped = { socket = skt, fd = skt:getfd() }
   skt:settimeout(0)
   setmetatable(wrapped, socket_mt)
   return wrapped
 end
+
+return thread

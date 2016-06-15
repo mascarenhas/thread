@@ -13,7 +13,7 @@ description = {
   homepage = "http://alien.luaforge.net/aio"
 }
 
-dependencies = { "alien", "bitlib" }
+dependencies = { "alien", "lua ~> 5.3" }
 
 external_dependencies = {
  platforms = {

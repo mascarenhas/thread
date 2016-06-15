@@ -1,12 +1,11 @@
 
-local table = table
 local alien = require "alien"
 
-module("thread.queue", package.seeall)
+local queue = {}
 
 local methods= {}
 
-function new(start_size)
+function queue.new(start_size)
    start_size = start_size or 2
    local buf = alien.table(start_size, 0)
    local q = { buf = buf, first = 1, last = 1, size = start_size, n = 0 }
@@ -53,5 +52,5 @@ function methods.remove(queue)
    if first > size then first = 1 end
    queue.first, queue.n = first, n - 1
    if n < (size / 2) then resize(queue, size / 2) end
-   return obj 
+   return obj
 end

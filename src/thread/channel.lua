@@ -1,15 +1,14 @@
 
 local thread = require "thread"
-local table = table
 
-module("thread.channel", package.seeall)
+local channel = {}
 
 local methods = {}
 
-function new()
-   local channel = { cv = thread.cv(), msgbox = {} }
-   setmetatable(channel, { __index = methods })
-   return channel
+function channel.new()
+   local chan = { cv = thread.cv(), msgbox = {} }
+   setmetatable(chan, { __index = methods })
+   return chan
 end
 
 function methods:send(msg)

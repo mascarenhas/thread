@@ -1,6 +1,6 @@
-require "luarocks.require"
-require "aio"
-require "thread"
+
+local aio = require "aio"
+local thread = require "thread"
 
 local function tail(file)
   local f = aio.popen("tail -f " .. file, "r")
