@@ -1,8 +1,8 @@
 
 local alien = require "alien"
-local coroutine = require "taggedcoro"
+local coroutine = require("taggedcoro").fortag("thread")
 
-local thread = { TAG = "thread" }
+local thread = {}
 
 local libevent = alien.load("event")
 
@@ -100,8 +100,8 @@ local function queue_timer(thr)
 end
 
 function thread.yield(...)
-   if coroutine.isyieldable(thread.TAG) then
-      coroutine.yield(thread.TAG, ...)
+   if coroutine.isyieldable() then
+      coroutine.yield(...)
    else
       thread.handle_yield("main", ...)
       return thread.event_loop()
@@ -168,7 +168,7 @@ end
 
 function thread.new(func, ...)
   local args = { ... }
-  local t = coroutine.wrap(function () return "dead", func(table.unpack(args)) end, thread.TAG)
+  local t = coroutine.wrap(function () return "dead", func(table.unpack(args)) end)
   live_threads[t] = true
   queue_event(t, "idle")
   thread.yield("idle")
@@ -208,7 +208,7 @@ function thread.event_loop()
 end
 
 function thread.join()
-  if coroutine.isyieldable(thread.TAG) then
+  if coroutine.isyieldable() then
     return error("cannot join outside main thread")
   end
   repeat
